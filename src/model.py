@@ -88,38 +88,55 @@ class ChebyCF(AllRankRec):
 
 class GraphAttentionLayer(nn.Module):
     """
-    Multi-head attention across item dimension.
-    Applied on high-frequency residual.
+    Efficient Multi-Head Attention over item dimension
+    Reduced hidden dimension for speed & memory efficiency.
     """
 
-    def __init__(self, num_items, heads=4):
+    def __init__(self, num_items, heads=4, hidden_dim=1024):
         super().__init__()
 
         self.num_items = num_items
         self.heads = heads
+        self.hidden_dim = hidden_dim
+        self.head_dim = hidden_dim // heads
 
-        self.q_proj = nn.Linear(num_items, num_items)
-        self.k_proj = nn.Linear(num_items, num_items)
-        self.v_proj = nn.Linear(num_items, num_items)
-        self.out_proj = nn.Linear(num_items, num_items)
+        assert hidden_dim % heads == 0, "hidden_dim must be divisible by heads"
 
-        self.layernorm = nn.LayerNorm(num_items)
+        # Project to lower dimension
+        self.q_proj = nn.Linear(num_items, hidden_dim, bias=False)
+        self.k_proj = nn.Linear(num_items, hidden_dim, bias=False)
+        self.v_proj = nn.Linear(num_items, hidden_dim, bias=False)
+
+        self.out_proj = nn.Linear(hidden_dim, num_items, bias=False)
+
+        self.scale = math.sqrt(self.head_dim)
 
     def forward(self, x):
         # x: (batch_size, num_items)
 
-        Q = self.q_proj(x)
+        B = x.size(0)
+
+        # Project
+        Q = self.q_proj(x)  # (B, hidden_dim)
         K = self.k_proj(x)
         V = self.v_proj(x)
 
-        scores = torch.matmul(Q.unsqueeze(1), K.unsqueeze(2)) / math.sqrt(self.num_items)
-        attn = torch.softmax(scores, dim=-1)
+        # Split heads
+        Q = Q.view(B, self.heads, self.head_dim)
+        K = K.view(B, self.heads, self.head_dim)
+        V = V.view(B, self.heads, self.head_dim)
 
-        out = torch.matmul(attn, V.unsqueeze(-1)).squeeze(-1)
+        # Attention score (scaled dot-product)
+        scores = (Q * K).sum(dim=-1) / self.scale   # (B, heads)
+        attn = torch.softmax(scores, dim=-1)        # (B, heads)
 
+        # Apply attention
+        out = (attn.unsqueeze(-1) * V).reshape(B, self.hidden_dim)
+
+        # Project back to item space
         out = self.out_proj(out)
 
-        return self.layernorm(x + out)
+        return x + out
 
 
 # =====================================================
@@ -155,7 +172,11 @@ class ChebyAttnCF(AllRankRec):
 
         # Initialize attention after knowing item size
         num_items = inter.shape[1]
-        self.attn = GraphAttentionLayer(num_items, self.heads)
+        self.attn = GraphAttentionLayer(
+        num_items,
+        heads=self.heads,
+        hidden_dim=1024   # có thể thử 512 nếu vẫn chậm
+        ).to(signal.device)
 
     def forward(self, signal):
 
