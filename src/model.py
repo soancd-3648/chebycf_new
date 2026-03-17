@@ -1,6 +1,5 @@
 import torch
 import math
-import torch.nn.functional as F
 from torch import nn
 
 from src.module import ChebyFilter, IdealFilter, DegreeNorm, LinearFilter
@@ -112,7 +111,9 @@ class GraphAttentionLayer(nn.Module):
         K = self.k_proj(x)
         V = self.v_proj(x)
 
-        scores = torch.matmul(Q.unsqueeze(1), K.unsqueeze(2)) / math.sqrt(self.num_items)
+        # Compute dense attention over the item dimension.
+        # Q/K: (batch, num_items) → scores: (batch, num_items, num_items)
+        scores = torch.matmul(Q.unsqueeze(2), K.unsqueeze(1)) / math.sqrt(self.num_items)
         attn = torch.softmax(scores, dim=-1)
 
         out = torch.matmul(attn, V.unsqueeze(-1)).squeeze(-1)
