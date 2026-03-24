@@ -155,7 +155,7 @@ class ChebyAttnCF(AllRankRec):
             self.norm.fit(inter)
 
         # Initialize attention after knowing item size
-        num_items = inter.size(1)
+        num_items = inter.shape[1]
         self.attn = GraphAttentionLayer(num_items, self.heads)
 
     def forward(self, signal):
